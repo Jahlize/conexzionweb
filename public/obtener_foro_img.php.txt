@@ -1,0 +1,81 @@
+<?php
+/**
+ * obtener_foro_img.php
+ * Versión mejorada de obtener_foro.php que incluye imágenes de los posts.
+ * Subir este archivo como: /upload/obtener_foro_img.php en el servidor.
+ */
+
+header('Content-Type: application/json; charset=utf-8');
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: GET');
+
+$VB_BASE = 'https://conexzion.cl/upload';
+$API_KEY = 'xLkCXYN9j0zeVrqOy5KuAku2jpXDlIGb';
+
+// Paso 1: obtener lista de temas del PHP existente (reutiliza la lógica)
+$temasRaw = [];
+$phpUrl = $VB_BASE . '/obtener_foro.php';
+$temasJson = @file_get_contents($phpUrl);
+if ($temasJson) {
+    $data = json_decode($temasJson, true);
+    $temasRaw = $data['temas'] ?? [];
+}
+
+// Paso 2: para cada tema, obtener la imagen via API interna
+$temas = [];
+foreach ($temasRaw as $tema) {
+    $imagen = null;
+
+    // Extraer nodeid de la URL
+    if (preg_match('/nodeid=(\d+)/', $tema['url'] ?? '', $m)) {
+        $nodeid = $m[1];
+
+        // Llamar a la API de vBulletin (server-side, sin CORS)
+        $apiUrl = $VB_BASE . '/api.php?api_m=node.getNodeContent'
+            . '&api_key=' . urlencode($API_KEY)
+            . '&clientid=1&accesstoken=guest'
+            . '&nodeid=' . urlencode($nodeid);
+
+        $nodeJson = @file_get_contents($apiUrl);
+        if ($nodeJson) {
+            $nodeData = json_decode($nodeJson, true);
+            $node = $nodeData[$nodeid] ?? null;
+            if ($node) {
+                // Buscar en attach array
+                $attachList = $node['attach'] ?? [];
+                foreach ($attachList as $att) {
+                    $ext = strtolower($att['extension'] ?? '');
+                    if (($att['basetype'] ?? '') === 'image' || in_array($ext, ['jpg','jpeg','png','gif','webp'])) {
+                        $fid = $att['filedataid'] ?? null;
+                        if ($fid) {
+                            $imagen = $VB_BASE . '/image.php?type=attach&id=' . $fid;
+                            break;
+                        }
+                    }
+                }
+                // Fallback: attachments object
+                if (!$imagen && !empty($node['attachments'])) {
+                    foreach ($node['attachments'] as $att) {
+                        $ext = strtolower($att['extension'] ?? '');
+                        if (($att['basetype'] ?? '') === 'image' || in_array($ext, ['jpg','jpeg','png','gif','webp'])) {
+                            $fid = $att['filedataid'] ?? null;
+                            if ($fid) {
+                                $imagen = $VB_BASE . '/image.php?type=attach&id=' . $fid;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    $temas[] = [
+        'titulo' => $tema['titulo'],
+        'autor'  => $tema['autor'],
+        'url'    => $tema['url'],
+        'imagen' => $imagen,
+    ];
+}
+
+echo json_encode(['temas' => $temas], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
